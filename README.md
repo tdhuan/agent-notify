@@ -15,14 +15,22 @@ best-effort report to herdr's unix socket when herdr is running.
 
 The desktop channel picks the best notification mechanism available:
 
-1. **terminal-notifier** — if installed, notifications are clickable:
-   clicking raises your terminal and runs `herdr agent focus` on the exact
+1. **terminal-notifier** — if installed, notifications carry a click
+   action: raise your terminal and run `herdr agent focus` on the exact
    agent pane that fired the event (when running inside herdr). Install
    once with `brew install terminal-notifier`.
 2. **kitty OSC 99** — without terminal-notifier, inside kitty: a native
    kitty notification; clicking it raises kitty (but cannot run a command,
    so no per-pane focus).
 3. **osascript** — fallback everywhere else; no click action.
+
+**Known caveat (macOS 15 / Sequoia):** terminal-notifier exits right
+after posting a notification, and newer macOS versions often fail to
+deliver the click back to the exited process — the banner appears but
+clicking does nothing. The embedded focus command itself is verified
+working (`herdr agent focus` reports the pane focused). If clicks do
+nothing on your machine, run the probe in Troubleshooting to check
+whether `-execute` works at all.
 
 ## Install (personal, local plugin)
 
@@ -75,6 +83,19 @@ channel (`ok` / `error` / `timeout`). That file is the first place to look.
 `npm install && npm run build` or hooks will fail with module-not-found.
 The log file also grows unbounded (one JSON line per dispatch, no
 rotation), so trim it occasionally.
+
+**Notification clicks do nothing?** Check whether terminal-notifier's
+click delivery works on your macOS at all, independent of this plugin:
+
+    rm -f /tmp/agent-notify-click-probe
+    terminal-notifier -title "click probe" -message "click me" \
+      -execute 'touch /tmp/agent-notify-click-probe'
+
+Click the banner, then check `ls /tmp/agent-notify-click-probe`. If the
+file never appears, `-execute` is broken at the platform level (see the
+caveat above). The focus command itself can always be run manually:
+
+    open -a kitty; herdr agent focus "$HERDR_PANE_ID"
 
 ## Adding a channel
 
