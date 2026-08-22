@@ -34,7 +34,13 @@ Copy the example to `~/.config/agent-notify/config.json` and edit:
 - `channels.herdr.socketEnv` — env var holding herdr's socket path
   (default `HERDR_SOCKET_PATH`); herdr is a silent no-op without it
 
-An missing or invalid config file silently falls back to defaults.
+The config path defaults to `~/.config/agent-notify/config.json` and can
+be overridden with the `AGENT_NOTIFY_CONFIG` env var. The herdr channel
+requires BOTH `HERDR_SOCKET_PATH` (or the configured `socketEnv`) and
+`HERDR_PANE_ID` to be set — with only the socket path set, herdr is
+silently absent.
+
+A missing or invalid config file silently falls back to defaults.
 
 ## Smoke test
 
@@ -49,14 +55,24 @@ Every dispatch appends one JSON line to
 `~/.local/state/agent-notify/log.jsonl` — input, resolved results per
 channel (`ok` / `error` / `timeout`). That file is the first place to look.
 
+`dist/` is a gitignored build artifact: after a fresh clone, run
+`npm install && npm run build` or hooks will fail with module-not-found.
+The log file also grows unbounded (one JSON line per dispatch, no
+rotation), so trim it occasionally.
+
 ## Adding a channel
 
 Implement `Channel` (`name` + `deliver(event): Promise<boolean>`) in
 `src/channels/`, register it in `src/channels/registry.ts`, add its default
-to `DEFAULT_CONFIG`. No other changes needed.
+to `DEFAULT_CONFIG`, and widen the `channels` type in `src/config.ts` to
+accept the new name.
 
 ## Adding an agent
 
 Write a normalizer mapping that agent's payload to `Event` (see
 `normalizeClaude` in `src/event.ts`) and have the agent's hook/notify
 mechanism call `node dist/cli.js dispatch --agent <name> --event <event>`.
+Core changes are also needed today: `src/cli.ts` routes only
+`--agent claude` (the agent check plus `normalizeClaude`), and
+`src/channels/herdr.ts` hardcodes `agent: "claude"` in its request params —
+a second adapter touches those points as well.

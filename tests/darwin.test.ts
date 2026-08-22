@@ -20,6 +20,19 @@ test("appleScriptEscape escapes backslash and double quote", () => {
   assert.equal(appleScriptEscape('a"b\\c'), 'a\\"b\\\\c');
 });
 
+test("appleScriptEscape replaces CR/LF with a space", () => {
+  assert.equal(appleScriptEscape("line1\nline2\rnext"), "line1 line2 next");
+});
+
+test("multi-line body produces a script with no raw line breaks", async () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls));
+  await ch.deliver({ ...EV, body: "line1\nline2" });
+  const script = calls[0].args[1];
+  assert.ok(script.includes('display notification "line1 line2"'));
+  assert.ok(!/[\n\r]/.test(script), "script must contain no raw newlines");
+});
+
 test("delivers via osascript -e with title, body, and default sound on", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls));

@@ -4,7 +4,7 @@ import type { Channel } from "./base.js";
 import { defaultExec, type Exec } from "./exec.js";
 
 export function appleScriptEscape(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\n\r]/g, " ");
 }
 
 export function createDarwinChannel(config: Config, exec: Exec = defaultExec): Channel {
