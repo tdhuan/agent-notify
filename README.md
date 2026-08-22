@@ -8,9 +8,29 @@ agent-agnostic so other agents (opencode, Codex CLI) can plug in later.
 - **Needs attention** — Claude requests a permission or waits for your input
 - **Turn finished** — Claude completed its response
 
-Delivered as macOS (`osascript`) or Linux (`notify-send`) desktop
-notifications, plus an optional best-effort report to herdr's unix socket
-when herdr is running.
+Delivered as macOS or Linux desktop notifications, plus an optional
+best-effort report to herdr's unix socket when herdr is running.
+
+## Click behavior (macOS)
+
+The desktop channel picks the best notification mechanism available:
+
+1. **terminal-notifier** — if installed, notifications carry a click
+   action: raise your terminal and run `herdr agent focus` on the exact
+   agent pane that fired the event (when running inside herdr). Install
+   once with `brew install terminal-notifier`.
+2. **kitty OSC 99** — without terminal-notifier, inside kitty: a native
+   kitty notification; clicking it raises kitty (but cannot run a command,
+   so no per-pane focus).
+3. **osascript** — fallback everywhere else; no click action.
+
+**Known caveat (macOS 15 / Sequoia):** terminal-notifier exits right
+after posting a notification, and newer macOS versions often fail to
+deliver the click back to the exited process — the banner appears but
+clicking does nothing. The embedded focus command itself is verified
+working (`herdr agent focus` reports the pane focused). If clicks do
+nothing on your machine, run the probe in Troubleshooting to check
+whether `-execute` works at all.
 
 ## Install (personal, local plugin)
 
@@ -28,6 +48,10 @@ Copy the example to `~/.config/agent-notify/config.json` and edit:
 
 - `channels.desktop.sound` — play the default alert sound (macOS only;
   notify-send has no portable sound)
+- `channels.desktop.terminalApp` — terminal app name used to raise the
+  terminal on notification click (macOS, terminal-notifier tier);
+  auto-detected from the environment (kitty, iTerm, Terminal, Ghostty),
+  override when detection fails
 - `events.<type>.sound` — per-event override of the channel default
 - `events.<type>.channels` — restrict which channels fire for that event
   (omit for all enabled channels)
@@ -59,6 +83,19 @@ channel (`ok` / `error` / `timeout`). That file is the first place to look.
 `npm install && npm run build` or hooks will fail with module-not-found.
 The log file also grows unbounded (one JSON line per dispatch, no
 rotation), so trim it occasionally.
+
+**Notification clicks do nothing?** Check whether terminal-notifier's
+click delivery works on your macOS at all, independent of this plugin:
+
+    rm -f /tmp/agent-notify-click-probe
+    terminal-notifier -title "click probe" -message "click me" \
+      -execute 'touch /tmp/agent-notify-click-probe'
+
+Click the banner, then check `ls /tmp/agent-notify-click-probe`. If the
+file never appears, `-execute` is broken at the platform level (see the
+caveat above). The focus command itself can always be run manually:
+
+    open -a kitty; herdr agent focus "$HERDR_PANE_ID"
 
 ## Adding a channel
 
