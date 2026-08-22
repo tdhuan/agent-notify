@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { EventType } from "./event.js";
 
-export interface DesktopChannelConfig { enabled?: boolean; sound?: boolean }
+export interface DesktopChannelConfig { enabled?: boolean; sound?: boolean; terminalApp?: string }
 export interface HerdrChannelConfig { enabled?: boolean; socketEnv?: string }
 export interface EventConfig { title?: string; sound?: boolean; channels?: string[] }
 

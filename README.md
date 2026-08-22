@@ -8,9 +8,21 @@ agent-agnostic so other agents (opencode, Codex CLI) can plug in later.
 - **Needs attention** — Claude requests a permission or waits for your input
 - **Turn finished** — Claude completed its response
 
-Delivered as macOS (`osascript`) or Linux (`notify-send`) desktop
-notifications, plus an optional best-effort report to herdr's unix socket
-when herdr is running.
+Delivered as macOS or Linux desktop notifications, plus an optional
+best-effort report to herdr's unix socket when herdr is running.
+
+## Click behavior (macOS)
+
+The desktop channel picks the best notification mechanism available:
+
+1. **terminal-notifier** — if installed, notifications are clickable:
+   clicking raises your terminal and runs `herdr agent focus` on the exact
+   agent pane that fired the event (when running inside herdr). Install
+   once with `brew install terminal-notifier`.
+2. **kitty OSC 99** — without terminal-notifier, inside kitty: a native
+   kitty notification; clicking it raises kitty (but cannot run a command,
+   so no per-pane focus).
+3. **osascript** — fallback everywhere else; no click action.
 
 ## Install (personal, local plugin)
 
@@ -28,6 +40,10 @@ Copy the example to `~/.config/agent-notify/config.json` and edit:
 
 - `channels.desktop.sound` — play the default alert sound (macOS only;
   notify-send has no portable sound)
+- `channels.desktop.terminalApp` — terminal app name used to raise the
+  terminal on notification click (macOS, terminal-notifier tier);
+  auto-detected from the environment (kitty, iTerm, Terminal, Ghostty),
+  override when detection fails
 - `events.<type>.sound` — per-event override of the channel default
 - `events.<type>.channels` — restrict which channels fire for that event
   (omit for all enabled channels)
