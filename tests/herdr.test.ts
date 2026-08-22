@@ -59,3 +59,18 @@ test("dead socket path -> false, no throw", async () => {
   });
   assert.equal(await ch.deliver(EV), false);
 });
+
+test("server that accepts then clean-closes without ack -> false, settles promptly", async () => {
+  const sockPath = join(tmp, "herdr-clean-close.sock");
+  const server = createServer((sock) => { sock.end(); });
+  server.listen(sockPath);
+  await once(server, "listening");
+  try {
+    const ch = createHerdrChannel(DEFAULT_CONFIG, {
+      HERDR_SOCKET_PATH: sockPath, HERDR_PANE_ID: "%5",
+    });
+    assert.equal(await ch.deliver(EV), false);
+  } finally {
+    server.close();
+  }
+});

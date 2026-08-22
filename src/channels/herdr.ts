@@ -44,6 +44,7 @@ export function createHerdrChannel(
           socket.write(JSON.stringify(request) + "\n");
         });
         socket.on("data", () => finish(true));
+        socket.on("close", () => finish(false));
       });
     },
   };
