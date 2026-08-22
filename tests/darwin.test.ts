@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createDarwinChannel, appleScriptEscape, terminalAppName,
-  buildTerminalNotifierArgs, buildOsc99,
+  buildTerminalNotifierArgs, buildOsc99, escapeRegex,
 } from "../src/channels/darwin.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { Exec } from "../src/channels/exec.js";
@@ -87,17 +87,106 @@ test("buildOsc99 emits title and body payloads with control chars stripped", () 
   assert.ok(!/[\n\r]/.test(seq), "sequence must contain no raw line breaks");
 });
 
+const SOCK = "unix:/tmp/kitty-remote.sock";
+
+test("escapeRegex escapes regex specials", () => {
+  assert.equal(escapeRegex("a.b*(c)"), "a\\.b\\*\\(c\\)");
+});
+
+test("full chain: exact kitty window, tab title snapshot, pane focus", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: true, paneId: "w8:pM", terminalApp: "kitty",
+    kittySocket: SOCK, windowId: "1", tabTitle: "◑ Add agent-notify git remote",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.equal(cmd,
+    `kitty @ --to ${SOCK} focus-window --match id:1 || open -a kitty; ` +
+    `kitty @ --to ${SOCK} focus-tab --match window_id:1 --match title:^◑ Add agent-notify git remote$; ` +
+    `herdr agent focus 'w8:pM'`);
+});
+
+test("tab title with regex specials is escaped in the match", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: false, paneId: "w8:pM",
+    kittySocket: SOCK, windowId: "2", tabTitle: "task (v2) [wip]",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.ok(cmd.includes("title:^task \\(v2\\) \\[wip\\]$"));
+});
+
+test("no tabTitle -> window + pane steps only", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: false, paneId: "w8:pM", terminalApp: "kitty",
+    kittySocket: SOCK, windowId: "1",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.equal(cmd,
+    `kitty @ --to ${SOCK} focus-window --match id:1 || open -a kitty; ` +
+    `herdr agent focus 'w8:pM'`);
+});
+
+test("kittySocket disabled -> legacy open -a chain", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: false, paneId: "w8:pM", terminalApp: "kitty",
+    kittySocket: "", windowId: "1", tabTitle: "t",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.equal(cmd, "open -a kitty; herdr agent focus 'w8:pM'");
+});
+
+test("no terminalApp -> socket chain without open fallback", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: false, paneId: "w8:pM", kittySocket: SOCK, windowId: "1",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.ok(cmd.includes("focus-window --match id:1;"), "no fallback segment");
+  assert.ok(!cmd.includes("open -a"));
+});
+
 // ---- tier selection in deliver --------------------------------------------
 
 test("tier 1: terminal-notifier available -> used with click action, osascript untouched", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
-    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" });
+    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" }, undefined, async () => undefined);
   assert.equal(await ch.deliver(EV), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, "terminal-notifier");
   assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1],
-    "open -a kitty; herdr agent focus 'w8:pM'");
+    `kitty @ --to ${SOCK} focus-window --match id:1 || open -a kitty; ` +
+    `herdr agent focus 'w8:pM'`);
+});
+
+test("tier 1 delivers with the snapshotted tab title", async () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const fetched: string[] = [];
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
+    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" }, undefined,
+    async (paneId) => { fetched.push(paneId); return "◑ Add agent-notify git remote"; });
+  assert.equal(await ch.deliver(EV), true);
+  assert.deepEqual(fetched, ["w8:pM"], "title fetched for the exact pane");
+  const cmd = calls[0].args[calls[0].args.indexOf("-execute") + 1];
+  assert.ok(cmd.includes(
+    `focus-tab --match window_id:1 --match title:^◑ Add agent-notify git remote$`));
+});
+
+test("tier 1 title fetch failure -> chain without the tab step", async () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
+    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" }, undefined,
+    async () => { throw new Error("herdr down"); });
+  assert.equal(await ch.deliver(EV), true);
+  const cmd = calls[0].args[calls[0].args.indexOf("-execute") + 1];
+  assert.ok(!cmd.includes("focus-tab"));
+});
+
+test("title fetcher not called without kitty markers in env", async () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const fetched: string[] = [];
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
+    { HERDR_PANE_ID: "w8:pM" }, undefined, async (p) => { fetched.push(p); return "t"; });
+  await ch.deliver(EV);
+  assert.deepEqual(fetched, []);
 });
 
 test("tier 1: config terminalApp overrides env detection", async () => {

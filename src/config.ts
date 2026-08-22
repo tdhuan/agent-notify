@@ -3,7 +3,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { EventType } from "./event.js";
 
-export interface DesktopChannelConfig { enabled?: boolean; sound?: boolean; terminalApp?: string }
+export interface DesktopChannelConfig {
+  enabled?: boolean;
+  sound?: boolean;
+  terminalApp?: string;
+  /** kitty remote-control socket for precise click-to-tab focus ("" disables). */
+  kittySocket?: string;
+}
 export interface HerdrChannelConfig { enabled?: boolean; socketEnv?: string }
 export interface EventConfig { title?: string; sound?: boolean; channels?: string[] }
 
@@ -14,7 +20,7 @@ export interface Config {
 
 export const DEFAULT_CONFIG: Config = {
   channels: {
-    desktop: { enabled: true, sound: true },
+    desktop: { enabled: true, sound: true, kittySocket: "unix:/tmp/kitty-remote.sock" },
     herdr: { enabled: true, socketEnv: "HERDR_SOCKET_PATH" },
   },
   events: {

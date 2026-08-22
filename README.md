@@ -16,21 +16,26 @@ best-effort report to herdr's unix socket when herdr is running.
 The desktop channel picks the best notification mechanism available:
 
 1. **terminal-notifier** — if installed, notifications carry a click
-   action: raise your terminal and run `herdr agent focus` on the exact
-   agent pane that fired the event (when running inside herdr). Install
+   action that lands on the exact agent: focus the kitty window that
+   hosts herdr (`kitty @ focus-window --match id:<KITTY_WINDOW_ID>`),
+   select herdr's tab inside it (title snapshotted at dispatch via
+   `herdr agent get`), then `herdr agent focus` the exact pane. Install
    once with `brew install terminal-notifier`.
 2. **kitty OSC 99** — without terminal-notifier, inside kitty: a native
    kitty notification; clicking it raises kitty (but cannot run a command,
    so no per-pane focus).
 3. **osascript** — fallback everywhere else; no click action.
 
-**Known caveat (macOS 15 / Sequoia):** terminal-notifier exits right
-after posting a notification, and newer macOS versions often fail to
-deliver the click back to the exited process — the banner appears but
-clicking does nothing. The embedded focus command itself is verified
-working (`herdr agent focus` reports the pane focused). If clicks do
-nothing on your machine, run the probe in Troubleshooting to check
-whether `-execute` works at all.
+**kitty prerequisite for exact tab focus:** remote control must be
+reachable without a controlling tty (the click-time shell has none), so
+kitty needs a listen socket. Add to `kitty.conf` and restart kitty:
+
+    listen_on unix:/tmp/kitty-remote.sock
+
+Without it, clicking falls back to `open -a kitty` (any kitty window)
+plus the herdr pane focus. Click delivery itself has been verified
+working on macOS 15; if clicks do nothing on your machine, run the
+probe in Troubleshooting to check whether `-execute` fires at all.
 
 ## Install (personal, local plugin)
 
@@ -52,6 +57,10 @@ Copy the example to `~/.config/agent-notify/config.json` and edit:
   terminal on notification click (macOS, terminal-notifier tier);
   auto-detected from the environment (kitty, iTerm, Terminal, Ghostty),
   override when detection fails
+- `channels.desktop.kittySocket` — kitty remote-control socket used for
+  exact window/tab focus on click (default
+  `unix:/tmp/kitty-remote.sock`; set `""` to disable the kitty chain and
+  always raise the whole app)
 - `events.<type>.sound` — per-event override of the channel default
 - `events.<type>.channels` — restrict which channels fire for that event
   (omit for all enabled channels)
