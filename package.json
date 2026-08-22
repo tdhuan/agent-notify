@@ -1,0 +1,14 @@
+{
+  "name": "agent-notify",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop notifications for coding agents. Claude Code first.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/tests/"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
