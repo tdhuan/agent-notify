@@ -44,11 +44,16 @@ export function configFilePath(): string {
 
 export function loadConfig(path?: string): Config {
   const file = path ?? configFilePath();
-  if (!existsSync(file)) return structuredClone(DEFAULT_CONFIG);
+  const freshDefaults = (): Config => structuredClone(DEFAULT_CONFIG);
+  if (!existsSync(file)) return freshDefaults();
   try {
-    return deepMerge(DEFAULT_CONFIG, JSON.parse(readFileSync(file, "utf8")));
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return freshDefaults();
+    }
+    return deepMerge(freshDefaults(), parsed);
   } catch {
-    return structuredClone(DEFAULT_CONFIG);
+    return freshDefaults();
   }
 }
 

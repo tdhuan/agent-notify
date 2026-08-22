@@ -66,3 +66,32 @@ test("enabledChannelNames: per-event filter and disabled channel both apply", ()
   cfg.channels.desktop.enabled = false;
   assert.deepEqual(enabledChannelNames(cfg, "needs_attention"), []);
 });
+
+test("loadConfig never shares mutable state with DEFAULT_CONFIG (missing file)", () => {
+  const cfg = loadConfig(join(tmp, "nope.json"));
+  assert.notEqual(cfg, DEFAULT_CONFIG);
+  cfg.channels.desktop.sound = false;
+  cfg.events.needs_attention.title = "mutated";
+  assert.equal(DEFAULT_CONFIG.channels.desktop.sound, true);
+  assert.equal(DEFAULT_CONFIG.events.needs_attention.title, "Claude needs your attention");
+});
+
+test("loadConfig: partial user file leaves untouched subtrees unshared", () => {
+  const p = join(tmp, "partial.json");
+  writeFileSync(p, JSON.stringify({ channels: { desktop: { sound: false } } }));
+  const cfg = loadConfig(p);
+  cfg.events.turn_done.title = "mutated";
+  cfg.channels.herdr.socketEnv = "mutated";
+  assert.equal(DEFAULT_CONFIG.events.turn_done.title, "Claude finished");
+  assert.equal(DEFAULT_CONFIG.channels.herdr.socketEnv, "HERDR_SOCKET_PATH");
+});
+
+test("loadConfig: non-object JSON (null/scalar/array) -> fresh defaults, no crash", () => {
+  const p = join(tmp, "nonobj.json");
+  for (const bad of ["null", "42", "\"x\"", "[1,2]"]) {
+    writeFileSync(p, bad);
+    const cfg = loadConfig(p);
+    assert.deepEqual(cfg, DEFAULT_CONFIG);
+    assert.notEqual(cfg, DEFAULT_CONFIG);
+  }
+});
