@@ -1,0 +1,26 @@
+{
+  "channels": {
+    "desktop": {
+      "enabled": true,
+      "sound": true,
+      "terminalApp": "kitty"
+    },
+    "herdr": {
+      "enabled": true,
+      "socketEnv": "HERDR_SOCKET_PATH"
+    }
+  },
+  "events": {
+    "needs_attention": {
+      "title": "Claude needs your attention",
+      "channels": [
+        "desktop",
+        "herdr"
+      ]
+    },
+    "turn_done": {
+      "title": "Claude finished",
+      "sound": false
+    }
+  }
+}

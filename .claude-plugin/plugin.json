@@ -1,0 +1,6 @@
+{
+  "name": "agent-notify",
+  "version": "0.1.0",
+  "description": "Desktop notifications for Claude Code events — needs attention, turn finished. Optional herdr forwarding.",
+  "author": { "name": "huantd" }
+}
