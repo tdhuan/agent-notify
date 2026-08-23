@@ -7,8 +7,6 @@ export interface DesktopChannelConfig {
   enabled?: boolean;
   sound?: boolean;
   terminalApp?: string;
-  /** kitty remote-control socket for precise click-to-tab focus ("" disables). */
-  kittySocket?: string;
 }
 export interface HerdrChannelConfig { enabled?: boolean; socketEnv?: string }
 export interface EventConfig { title?: string; sound?: boolean; channels?: string[] }
@@ -20,7 +18,7 @@ export interface Config {
 
 export const DEFAULT_CONFIG: Config = {
   channels: {
-    desktop: { enabled: true, sound: true, kittySocket: "unix:/tmp/kitty-remote.sock" },
+    desktop: { enabled: true, sound: true },
     herdr: { enabled: true, socketEnv: "HERDR_SOCKET_PATH" },
   },
   events: {

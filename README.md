@@ -16,26 +16,34 @@ best-effort report to herdr's unix socket when herdr is running.
 The desktop channel picks the best notification mechanism available:
 
 1. **terminal-notifier** — if installed, notifications carry a click
-   action that lands on the exact agent: focus the kitty window that
-   hosts herdr (`kitty @ focus-window --match id:<KITTY_WINDOW_ID>`),
-   select herdr's tab inside it (title snapshotted at dispatch via
-   `herdr agent get`), then `herdr agent focus` the exact pane. Install
-   once with `brew install terminal-notifier`.
+   action that lands on the exact agent: `click-focus.sh` at the plugin
+   root resolves the live kitty remote-control socket, focuses herdr's
+   kitty tab, raises kitty (`open -a kitty` — focus-tab alone does not
+   lift kitty above other apps), then runs `herdr agent focus` on the
+   exact pane. Install once with `brew install terminal-notifier`.
 2. **kitty OSC 99** — without terminal-notifier, inside kitty: a native
    kitty notification; clicking it raises kitty (but cannot run a command,
    so no per-pane focus).
 3. **osascript** — fallback everywhere else; no click action.
 
-**kitty prerequisite for exact tab focus:** remote control must be
-reachable without a controlling tty (the click-time shell has none), so
-kitty needs a listen socket. Add to `kitty.conf` and restart kitty:
+**Why a helper script:** terminal-notifier's `-execute` reliably fires
+short, metachar-free commands; long compound shell chains (quotes,
+`;`, `||`, redirections) do not survive its click delivery on macOS.
+The dispatch therefore bakes only `<script> <pane-id>` into the
+notification, and the script does everything else at click time — when
+the click-time shell has a minimal environment (no PATH to kitty/herdr,
+no HOME guarantees). The script also re-resolves kitty's socket on every
+click, since kitty appends its PID to `kitty.conf` `listen_on` paths.
+
+**kitty prerequisite for exact tab focus:** add to `kitty.conf` and
+restart kitty:
 
     listen_on unix:/tmp/kitty-remote.sock
 
-Without it, clicking falls back to `open -a kitty` (any kitty window)
-plus the herdr pane focus. Click delivery itself has been verified
-working on macOS 15; if clicks do nothing on your machine, run the
-probe in Troubleshooting to check whether `-execute` fires at all.
+Also keep `allow_remote_control yes`. Without a live socket the script
+still raises kitty and focuses the herdr pane. The script logs each
+click to `/tmp/agent-notify-click.log` — that file is the first place
+to look when clicks misbehave.
 
 ## Install (personal, local plugin)
 
@@ -56,11 +64,8 @@ Copy the example to `~/.config/agent-notify/config.json` and edit:
 - `channels.desktop.terminalApp` — terminal app name used to raise the
   terminal on notification click (macOS, terminal-notifier tier);
   auto-detected from the environment (kitty, iTerm, Terminal, Ghostty),
-  override when detection fails
-- `channels.desktop.kittySocket` — kitty remote-control socket used for
-  exact window/tab focus on click (default
-  `unix:/tmp/kitty-remote.sock`; set `""` to disable the kitty chain and
-  always raise the whole app)
+  override when detection fails. Click-to-tab specifics (socket base,
+  herdr tab title) are tuned in `click-focus.sh`, not config.
 - `events.<type>.sound` — per-event override of the channel default
 - `events.<type>.channels` — restrict which channels fire for that event
   (omit for all enabled channels)

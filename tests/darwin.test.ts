@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createDarwinChannel, appleScriptEscape, terminalAppName,
-  buildTerminalNotifierArgs, buildOsc99, escapeRegex,
+  buildTerminalNotifierArgs, buildOsc99,
 } from "../src/channels/darwin.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type { Exec } from "../src/channels/exec.js";
@@ -22,6 +25,11 @@ const EV: Event = {
   sessionId: "s1",
   cwd: "/tmp",
 };
+
+const tmp = mkdtempSync(join(tmpdir(), "agent-notify-darwin-"));
+test.after(() => rmSync(tmp, { recursive: true, force: true }));
+const SCRIPT = join(tmp, "click-focus.sh");
+writeFileSync(SCRIPT, "#!/bin/sh\n");
 
 // ---- pure helpers ---------------------------------------------------------
 
@@ -51,35 +59,6 @@ test("terminalAppName returns undefined for unknown terminals", () => {
   assert.equal(terminalAppName({}), undefined);
 });
 
-test("buildTerminalNotifierArgs: pane + terminal app -> click focuses exact pane", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: true, paneId: "w8:pM", terminalApp: "kitty" });
-  assert.deepEqual(args, [
-    "-title", "Claude needs your attention",
-    "-message", 'Run "npm test"?',
-    "-sound", "default",
-    "-execute", "open -a kitty; herdr agent focus 'w8:pM'",
-  ]);
-});
-
-test("buildTerminalNotifierArgs: pane without terminal app -> focus command only", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: false, paneId: "w8:pM" });
-  assert.deepEqual(args, [
-    "-title", "Claude needs your attention",
-    "-message", 'Run "npm test"?',
-    "-execute", "herdr agent focus 'w8:pM'",
-  ]);
-});
-
-test("buildTerminalNotifierArgs: no pane id -> no -execute flag at all", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: true });
-  assert.deepEqual(args, ["-title", EV.title, "-message", EV.body, "-sound", "default"]);
-});
-
-test("buildTerminalNotifierArgs: sound off -> no -sound flag", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: false, paneId: "w8:pM", terminalApp: "kitty" });
-  assert.ok(!args.includes("-sound"));
-});
-
 test("buildOsc99 emits title and body payloads with control chars stripped", () => {
   const seq = buildOsc99({ ...EV, body: "line1\nline2" });
   assert.ok(seq.includes("\x1b]99;i=1:d=0;Claude needs your attention\x1b\\"));
@@ -87,123 +66,60 @@ test("buildOsc99 emits title and body payloads with control chars stripped", () 
   assert.ok(!/[\n\r]/.test(seq), "sequence must contain no raw line breaks");
 });
 
-const SOCK = "unix:/tmp/kitty-remote.sock";
+// ---- tier 1 argv construction ---------------------------------------------
 
-test("escapeRegex escapes regex specials", () => {
-  assert.equal(escapeRegex("a.b*(c)"), "a\\.b\\*\\(c\\)");
-});
-
-test("full chain: exact kitty window, tab title snapshot, pane focus", () => {
+test("click action is a short script invocation with the pane id", () => {
   const args = buildTerminalNotifierArgs(EV, {
-    sound: true, paneId: "w8:pM", terminalApp: "kitty",
-    kittySocket: SOCK, windowId: "1", tabTitle: "◑ Add agent-notify git remote",
+    sound: true, paneId: "w8:pM", clickScript: "/repo/click-focus.sh",
   });
   const cmd = args[args.indexOf("-execute") + 1];
-  assert.equal(cmd,
-    `kitty @ --to ${SOCK} focus-window --match id:1 || open -a kitty; ` +
-    `kitty @ --to ${SOCK} focus-tab --match window_id:1 --match title:^◑ Add agent-notify git remote$; ` +
-    `herdr agent focus 'w8:pM'`);
+  assert.equal(cmd, "/repo/click-focus.sh w8:pM",
+    "no shell metacharacters — long compound chains do not survive click delivery");
 });
 
-test("tab title with regex specials is escaped in the match", () => {
-  const args = buildTerminalNotifierArgs(EV, {
-    sound: false, paneId: "w8:pM",
-    kittySocket: SOCK, windowId: "2", tabTitle: "task (v2) [wip]",
-  });
-  const cmd = args[args.indexOf("-execute") + 1];
-  assert.ok(cmd.includes("title:^task \\(v2\\) \\[wip\\]$"));
+test("no pane id -> no -execute flag", () => {
+  const args = buildTerminalNotifierArgs(EV, { sound: true, clickScript: "/repo/click-focus.sh" });
+  assert.ok(!args.includes("-execute"));
 });
 
-test("no tabTitle -> window + pane steps only", () => {
-  const args = buildTerminalNotifierArgs(EV, {
-    sound: false, paneId: "w8:pM", terminalApp: "kitty",
-    kittySocket: SOCK, windowId: "1",
-  });
-  const cmd = args[args.indexOf("-execute") + 1];
-  assert.equal(cmd,
-    `kitty @ --to ${SOCK} focus-window --match id:1 || open -a kitty; ` +
-    `herdr agent focus 'w8:pM'`);
+test("no click script -> no -execute flag", () => {
+  const args = buildTerminalNotifierArgs(EV, { sound: true, paneId: "w8:pM" });
+  assert.ok(!args.includes("-execute"));
 });
 
-test("kittySocket disabled -> legacy open -a chain", () => {
+test("sound off -> no -sound flag", () => {
   const args = buildTerminalNotifierArgs(EV, {
-    sound: false, paneId: "w8:pM", terminalApp: "kitty",
-    kittySocket: "", windowId: "1", tabTitle: "t",
+    sound: false, paneId: "w8:pM", clickScript: "/repo/click-focus.sh",
   });
-  const cmd = args[args.indexOf("-execute") + 1];
-  assert.equal(cmd, "open -a kitty; herdr agent focus 'w8:pM'");
-});
-
-test("no terminalApp -> socket chain without open fallback", () => {
-  const args = buildTerminalNotifierArgs(EV, {
-    sound: false, paneId: "w8:pM", kittySocket: SOCK, windowId: "1",
-  });
-  const cmd = args[args.indexOf("-execute") + 1];
-  assert.ok(cmd.includes("focus-window --match id:1;"), "no fallback segment");
-  assert.ok(!cmd.includes("open -a"));
+  assert.ok(!args.includes("-sound"));
 });
 
 // ---- tier selection in deliver --------------------------------------------
 
-test("tier 1: terminal-notifier available -> used with click action, osascript untouched", async () => {
+test("tier 1: existing script -> -execute invokes it with the pane id", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
-    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" }, undefined, async () => undefined);
+    { HERDR_PANE_ID: "w8:pM" }, { clickScriptPath: SCRIPT });
   assert.equal(await ch.deliver(EV), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, "terminal-notifier");
-  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1],
-    `kitty @ --to ${SOCK} focus-window --match id:1 || open -a kitty; ` +
-    `herdr agent focus 'w8:pM'`);
+  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1], `${SCRIPT} w8:pM`);
 });
 
-test("tier 1 delivers with the snapshotted tab title", async () => {
+test("tier 1: missing script -> no click action, delivery still ok", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
-  const fetched: string[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
-    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" }, undefined,
-    async (paneId) => { fetched.push(paneId); return "◑ Add agent-notify git remote"; });
+    { HERDR_PANE_ID: "w8:pM" }, { clickScriptPath: join(tmp, "nope.sh") });
   assert.equal(await ch.deliver(EV), true);
-  assert.deepEqual(fetched, ["w8:pM"], "title fetched for the exact pane");
-  const cmd = calls[0].args[calls[0].args.indexOf("-execute") + 1];
-  assert.ok(cmd.includes(
-    `focus-tab --match window_id:1 --match title:^◑ Add agent-notify git remote$`));
-});
-
-test("tier 1 title fetch failure -> chain without the tab step", async () => {
-  const calls: { cmd: string; args: string[] }[] = [];
-  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
-    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" }, undefined,
-    async () => { throw new Error("herdr down"); });
-  assert.equal(await ch.deliver(EV), true);
-  const cmd = calls[0].args[calls[0].args.indexOf("-execute") + 1];
-  assert.ok(!cmd.includes("focus-tab"));
-});
-
-test("title fetcher not called without kitty markers in env", async () => {
-  const calls: { cmd: string; args: string[] }[] = [];
-  const fetched: string[] = [];
-  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
-    { HERDR_PANE_ID: "w8:pM" }, undefined, async (p) => { fetched.push(p); return "t"; });
-  await ch.deliver(EV);
-  assert.deepEqual(fetched, []);
-});
-
-test("tier 1: config terminalApp overrides env detection", async () => {
-  const calls: { cmd: string; args: string[] }[] = [];
-  const cfg = { ...DEFAULT_CONFIG, channels: { ...DEFAULT_CONFIG.channels,
-    desktop: { ...DEFAULT_CONFIG.channels.desktop, terminalApp: "iTerm" } } };
-  const ch = createDarwinChannel(cfg, recordingExec(calls), { HERDR_PANE_ID: "w8:pM" });
-  await ch.deliver(EV);
-  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1],
-    "open -a iTerm; herdr agent focus 'w8:pM'");
+  assert.ok(!calls[0].args.includes("-execute"));
 });
 
 test("tier 2: no terminal-notifier, kitty env -> OSC 99 written to tty", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const written: string[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG,
-    recordingExec(calls, ["terminal-notifier"]), { KITTY_WINDOW_ID: "1" }, (s) => { written.push(s); });
+    recordingExec(calls, ["terminal-notifier"]), { KITTY_WINDOW_ID: "1" },
+    { writeTty: (s) => { written.push(s); }, clickScriptPath: SCRIPT });
   assert.equal(await ch.deliver(EV), true);
   assert.deepEqual(calls, [], "tier 2 settles the delivery; no exec tier runs");
   assert.equal(written.length, 1);
@@ -214,7 +130,7 @@ test("tier 2 failure falls through to osascript", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG,
     recordingExec(calls, ["terminal-notifier"]), { KITTY_WINDOW_ID: "1" },
-    () => { throw new Error("no tty"); });
+    { writeTty: () => { throw new Error("no tty"); } });
   assert.equal(await ch.deliver(EV), true);
   assert.deepEqual(calls.map((c) => c.cmd), ["osascript"]);
 });
