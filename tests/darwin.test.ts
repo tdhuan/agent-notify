@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createDarwinChannel, appleScriptEscape, terminalAppName,
   buildTerminalNotifierArgs, buildOsc99,
@@ -22,6 +25,11 @@ const EV: Event = {
   sessionId: "s1",
   cwd: "/tmp",
 };
+
+const tmp = mkdtempSync(join(tmpdir(), "agent-notify-darwin-"));
+test.after(() => rmSync(tmp, { recursive: true, force: true }));
+const SCRIPT = join(tmp, "click-focus.sh");
+writeFileSync(SCRIPT, "#!/bin/sh\n");
 
 // ---- pure helpers ---------------------------------------------------------
 
@@ -51,35 +59,6 @@ test("terminalAppName returns undefined for unknown terminals", () => {
   assert.equal(terminalAppName({}), undefined);
 });
 
-test("buildTerminalNotifierArgs: pane + terminal app -> click focuses exact pane", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: true, paneId: "w8:pM", terminalApp: "kitty" });
-  assert.deepEqual(args, [
-    "-title", "Claude needs your attention",
-    "-message", 'Run "npm test"?',
-    "-sound", "default",
-    "-execute", "open -a kitty; herdr agent focus 'w8:pM'",
-  ]);
-});
-
-test("buildTerminalNotifierArgs: pane without terminal app -> focus command only", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: false, paneId: "w8:pM" });
-  assert.deepEqual(args, [
-    "-title", "Claude needs your attention",
-    "-message", 'Run "npm test"?',
-    "-execute", "herdr agent focus 'w8:pM'",
-  ]);
-});
-
-test("buildTerminalNotifierArgs: no pane id -> no -execute flag at all", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: true });
-  assert.deepEqual(args, ["-title", EV.title, "-message", EV.body, "-sound", "default"]);
-});
-
-test("buildTerminalNotifierArgs: sound off -> no -sound flag", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: false, paneId: "w8:pM", terminalApp: "kitty" });
-  assert.ok(!args.includes("-sound"));
-});
-
 test("buildOsc99 emits title and body payloads with control chars stripped", () => {
   const seq = buildOsc99({ ...EV, body: "line1\nline2" });
   assert.ok(seq.includes("\x1b]99;i=1:d=0;Claude needs your attention\x1b\\"));
@@ -87,34 +66,60 @@ test("buildOsc99 emits title and body payloads with control chars stripped", () 
   assert.ok(!/[\n\r]/.test(seq), "sequence must contain no raw line breaks");
 });
 
+// ---- tier 1 argv construction ---------------------------------------------
+
+test("click action is a short script invocation with the pane id", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: true, paneId: "w8:pM", clickScript: "/repo/click-focus.sh",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.equal(cmd, "/repo/click-focus.sh w8:pM",
+    "no shell metacharacters — long compound chains do not survive click delivery");
+});
+
+test("no pane id -> no -execute flag", () => {
+  const args = buildTerminalNotifierArgs(EV, { sound: true, clickScript: "/repo/click-focus.sh" });
+  assert.ok(!args.includes("-execute"));
+});
+
+test("no click script -> no -execute flag", () => {
+  const args = buildTerminalNotifierArgs(EV, { sound: true, paneId: "w8:pM" });
+  assert.ok(!args.includes("-execute"));
+});
+
+test("sound off -> no -sound flag", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: false, paneId: "w8:pM", clickScript: "/repo/click-focus.sh",
+  });
+  assert.ok(!args.includes("-sound"));
+});
+
 // ---- tier selection in deliver --------------------------------------------
 
-test("tier 1: terminal-notifier available -> used with click action, osascript untouched", async () => {
+test("tier 1: existing script -> -execute invokes it with the pane id", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
-    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "1" });
+    { HERDR_PANE_ID: "w8:pM" }, { clickScriptPath: SCRIPT });
   assert.equal(await ch.deliver(EV), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, "terminal-notifier");
-  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1],
-    "open -a kitty; herdr agent focus 'w8:pM'");
+  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1], `${SCRIPT} w8:pM`);
 });
 
-test("tier 1: config terminalApp overrides env detection", async () => {
+test("tier 1: missing script -> no click action, delivery still ok", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
-  const cfg = { ...DEFAULT_CONFIG, channels: { ...DEFAULT_CONFIG.channels,
-    desktop: { ...DEFAULT_CONFIG.channels.desktop, terminalApp: "iTerm" } } };
-  const ch = createDarwinChannel(cfg, recordingExec(calls), { HERDR_PANE_ID: "w8:pM" });
-  await ch.deliver(EV);
-  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1],
-    "open -a iTerm; herdr agent focus 'w8:pM'");
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
+    { HERDR_PANE_ID: "w8:pM" }, { clickScriptPath: join(tmp, "nope.sh") });
+  assert.equal(await ch.deliver(EV), true);
+  assert.ok(!calls[0].args.includes("-execute"));
 });
 
 test("tier 2: no terminal-notifier, kitty env -> OSC 99 written to tty", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const written: string[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG,
-    recordingExec(calls, ["terminal-notifier"]), { KITTY_WINDOW_ID: "1" }, (s) => { written.push(s); });
+    recordingExec(calls, ["terminal-notifier"]), { KITTY_WINDOW_ID: "1" },
+    { writeTty: (s) => { written.push(s); }, clickScriptPath: SCRIPT });
   assert.equal(await ch.deliver(EV), true);
   assert.deepEqual(calls, [], "tier 2 settles the delivery; no exec tier runs");
   assert.equal(written.length, 1);
@@ -125,7 +130,7 @@ test("tier 2 failure falls through to osascript", async () => {
   const calls: { cmd: string; args: string[] }[] = [];
   const ch = createDarwinChannel(DEFAULT_CONFIG,
     recordingExec(calls, ["terminal-notifier"]), { KITTY_WINDOW_ID: "1" },
-    () => { throw new Error("no tty"); });
+    { writeTty: () => { throw new Error("no tty"); } });
   assert.equal(await ch.deliver(EV), true);
   assert.deepEqual(calls.map((c) => c.cmd), ["osascript"]);
 });
