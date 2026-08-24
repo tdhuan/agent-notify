@@ -68,28 +68,36 @@ test("buildOsc99 emits title and body payloads with control chars stripped", () 
 
 // ---- tier 1 argv construction ---------------------------------------------
 
-test("click action is a short script invocation with the pane id", () => {
+test("click action is a short script invocation with the herdr pane id", () => {
   const args = buildTerminalNotifierArgs(EV, {
-    sound: true, paneId: "w8:pM", clickScript: "/repo/click-focus.sh",
+    sound: true, clickTarget: "w8:pM", clickScript: "/repo/click-focus.sh",
   });
   const cmd = args[args.indexOf("-execute") + 1];
   assert.equal(cmd, "/repo/click-focus.sh w8:pM",
     "no shell metacharacters — long compound chains do not survive click delivery");
 });
 
-test("no pane id -> no -execute flag", () => {
+test("click action for a kitty-direct session bakes kwin:<window-id>", () => {
+  const args = buildTerminalNotifierArgs(EV, {
+    sound: true, clickTarget: "kwin:17", clickScript: "/repo/click-focus.sh",
+  });
+  const cmd = args[args.indexOf("-execute") + 1];
+  assert.equal(cmd, "/repo/click-focus.sh kwin:17");
+});
+
+test("no click target -> no -execute flag", () => {
   const args = buildTerminalNotifierArgs(EV, { sound: true, clickScript: "/repo/click-focus.sh" });
   assert.ok(!args.includes("-execute"));
 });
 
 test("no click script -> no -execute flag", () => {
-  const args = buildTerminalNotifierArgs(EV, { sound: true, paneId: "w8:pM" });
+  const args = buildTerminalNotifierArgs(EV, { sound: true, clickTarget: "w8:pM" });
   assert.ok(!args.includes("-execute"));
 });
 
 test("sound off -> no -sound flag", () => {
   const args = buildTerminalNotifierArgs(EV, {
-    sound: false, paneId: "w8:pM", clickScript: "/repo/click-focus.sh",
+    sound: false, clickTarget: "w8:pM", clickScript: "/repo/click-focus.sh",
   });
   assert.ok(!args.includes("-sound"));
 });
@@ -104,6 +112,24 @@ test("tier 1: existing script -> -execute invokes it with the pane id", async ()
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, "terminal-notifier");
   assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1], `${SCRIPT} w8:pM`);
+});
+
+test("tier 1: kitty without herdr -> -execute bakes kwin:<KITTY_WINDOW_ID>", async () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
+    { KITTY_WINDOW_ID: "17" }, { clickScriptPath: SCRIPT });
+  assert.equal(await ch.deliver(EV), true);
+  assert.equal(calls[0].args[calls[0].args.indexOf("-execute") + 1], `${SCRIPT} kwin:17`);
+});
+
+test("tier 1: herdr pane id wins when both env ids are present", async () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const ch = createDarwinChannel(DEFAULT_CONFIG, recordingExec(calls),
+    { HERDR_PANE_ID: "w8:pM", KITTY_WINDOW_ID: "17" }, { clickScriptPath: SCRIPT });
+  assert.equal(await ch.deliver(EV), true);
+  const execArg = calls[0].args[calls[0].args.indexOf("-execute") + 1];
+  assert.equal(execArg, `${SCRIPT} w8:pM`);
+  assert.ok(!execArg.includes("kwin"), "herdr session: never bake a kitty window id");
 });
 
 test("tier 1: missing script -> no click action, delivery still ok", async () => {

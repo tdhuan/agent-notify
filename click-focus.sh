@@ -1,9 +1,11 @@
 #!/bin/sh
-# agent-notify click handler — focus herdr's kitty tab, then the agent pane.
+# agent-notify click handler — focus the kitty tab/pane running the agent.
 # Invoked by terminal-notifier's -execute with a minimal environment, so it
 # must not rely on PATH, HOME-based lookup, or complex quoting upstream.
 #
-# Usage: click-focus.sh <pane-id> [tab-title] [socket-base]
+# Usage: click-focus.sh <target> [tab-title] [socket-base]
+#   target = w8:pM     herdr pane id  -> focus herdr's kitty tab, then the pane
+#          | kwin:17   kitty window id -> focus that kitty tab + window directly
 PANE_ID="$1"
 TAB_TITLE="${2:-herdr}"
 SOCKET_BASE="${3:-unix:/tmp/kitty-remote.sock}"
@@ -15,11 +17,35 @@ HERDR_BIN="$HOME/.local/bin/herdr"
 
 log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
 
-# Resolve the live kitty socket: kitty appends its PID to kitty.conf
-# listen_on paths, so probe each suffixed candidate for the herdr tab.
+# kitty appends its PID to kitty.conf listen_on paths, so the live socket is
+# always one of the suffixed candidates under the configured base.
 prefix="${SOCKET_BASE#unix:}"
 dir="${prefix%/*}"
 stem="${prefix##*/}"
+
+# kitty-direct session: focus the tab containing window <id>, then the window
+# itself. Attempting focus-tab per socket doubles as instance resolution —
+# only the kitty owning the window has a matching tab.
+case "$PANE_ID" in
+  kwin:*)
+    win="${PANE_ID#kwin:}"
+    for cand in "$dir/$stem"-*; do
+      [ -S "$cand" ] || continue
+      if "$KITTY_BIN" @ --to "unix:$cand" focus-tab --match "window_id:$win" 2>/dev/null; then
+        "$KITTY_BIN" @ --to "unix:$cand" focus-window --match "id:$win" 2>/dev/null \
+          && log "kitty focus ok (win $win, unix:$cand)" \
+          || log "focus-window FAILED (win $win, unix:$cand)"
+        open -a kitty
+        exit 0
+      fi
+    done
+    log "no socket has window $win — raising app only"
+    open -a kitty
+    exit 0
+    ;;
+esac
+
+# herdr session: resolve the socket whose kitty hosts the herdr tab.
 socket=""
 for cand in "$dir/$stem"-*; do
   [ -S "$cand" ] || continue
