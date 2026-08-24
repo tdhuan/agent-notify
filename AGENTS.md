@@ -25,10 +25,11 @@ Three layers, kept strictly separate:
 
 **`click-focus.sh` contract** — the critical, empirically-discovered constraint of this repo:
 
-- terminal-notifier's `-execute` reliably fires only **short, metachar-free commands**; long compound shell chains (quotes, `;`, `||`, redirections) silently never run on click. The dispatch must bake only `<repo>/click-focus.sh <pane-id>` into the notification.
+- terminal-notifier's `-execute` reliably fires only **short, metachar-free commands**; long compound shell chains (quotes, `;`, `||`, redirections) silently never run on click. The dispatch must bake only `<repo>/click-focus.sh <target>` into the notification.
+- The `<target>` encodes precedence: herdr pane id (`w8:pM`) when `HERDR_PANE_ID` is set (herdr wins when both env ids exist), else `kwin:<KITTY_WINDOW_ID>` for a session running directly in kitty.
 - The script resolves everything at click time because the click-time shell has a minimal environment: no PATH to `kitty`/`herdr`, no HOME guarantees, and kitty PID-suffixes its `kitty.conf` `listen_on` socket paths (so the live socket must be globbed and probed per click).
-- Env-baked kitty ids (`KITTY_WINDOW_ID`/`KITTY_PID`) go stale across kitty restarts — never bake them.
-- The script always runs `open -a kitty`: `kitty @ focus-tab` switches tabs inside kitty but does not lift kitty above other apps.
+- Baked kitty ids can go stale across kitty restarts — the script degrades to raising kitty (`open -a kitty`) when no live socket has the target.
+- The script always runs `open -a kitty`: `kitty @ focus-tab`/`focus-window` switch tabs/panes inside kitty but do not lift kitty above other apps.
 - Click activity logs to `/tmp/agent-notify-click.log`; dispatches log to `~/.local/state/agent-notify/log.jsonl`.
 
 ## Testing conventions

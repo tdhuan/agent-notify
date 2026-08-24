@@ -41,7 +41,8 @@ export function defaultClickScriptPath(): string {
 
 interface NotifierOptions {
   sound: boolean;
-  paneId?: string;
+  /** Click target baked for click-focus.sh: herdr pane id (w8:pM) or kwin:<id>. */
+  clickTarget?: string;
   /** Absolute path to click-focus.sh; presence enables the click action. */
   clickScript?: string;
 }
@@ -52,8 +53,8 @@ interface NotifierOptions {
 export function buildTerminalNotifierArgs(event: Event, opts: NotifierOptions): string[] {
   const args = ["-title", event.title, "-message", event.body];
   if (opts.sound) args.push("-sound", "default");
-  if (opts.paneId && opts.clickScript) {
-    args.push("-execute", `${opts.clickScript} ${opts.paneId}`);
+  if (opts.clickTarget && opts.clickScript) {
+    args.push("-execute", `${opts.clickScript} ${opts.clickTarget}`);
   }
   return args;
 }
@@ -80,15 +81,19 @@ export function createDarwinChannel(
     name: "desktop",
     async deliver(event: Event): Promise<boolean> {
       const sound = resolveSound(config, event.type);
-      const paneId = env.HERDR_PANE_ID ? String(env.HERDR_PANE_ID) : undefined;
+      // Click target precedence: the herdr pane id when the session runs under
+      // herdr, else the kitty window id (kwin:) for a direct-kitty session.
+      const clickTarget = env.HERDR_PANE_ID
+        ? String(env.HERDR_PANE_ID)
+        : env.KITTY_WINDOW_ID ? `kwin:${env.KITTY_WINDOW_ID}` : undefined;
       const clickScript = deps.clickScriptPath ?? defaultClickScriptPath();
       const script =
-        paneId && clickScript && existsSync(clickScript) ? clickScript : undefined;
+        clickTarget && clickScript && existsSync(clickScript) ? clickScript : undefined;
 
       // Tier 1: terminal-notifier — the only macOS notification with a click action.
       try {
         await exec("terminal-notifier",
-          buildTerminalNotifierArgs(event, { sound, paneId, clickScript: script }));
+          buildTerminalNotifierArgs(event, { sound, clickTarget, clickScript: script }));
         return true;
       } catch { /* not installed, or it failed — next tier */ }
 

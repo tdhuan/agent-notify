@@ -59,9 +59,13 @@ Two events, three delivery channels:
 The desktop channel picks the best mechanism available:
 
 1. **terminal-notifier** — clickable. Clicking runs `click-focus.sh`,
-   which lands on the exact agent: resolve kitty's live remote-control
-   socket → focus herdr's kitty tab → raise kitty → `herdr agent focus`
-   the exact pane that fired.
+   which lands on the exact agent session, wherever it runs:
+   - **under herdr** — resolve kitty's live remote-control socket →
+     focus herdr's kitty tab → raise kitty → `herdr agent focus` the
+     exact pane that fired
+   - **directly in kitty** — focus the kitty tab containing the firing
+     window (`focus-tab --match window_id:`), focus the window itself
+     (`focus-window --match id:`), raise kitty
 2. **kitty OSC 99** — no terminal-notifier but running inside kitty: a
    native kitty notification; clicking raises kitty only (kitty cannot
    run a command on click, so no tab/pane focus).
@@ -69,10 +73,14 @@ The desktop channel picks the best mechanism available:
 
 Why a helper script: terminal-notifier's `-execute` reliably fires only
 short, metachar-free commands — long compound shell chains silently
-never run. The dispatch bakes just `<repo>/click-focus.sh <pane-id>`;
-the script does the rest at click time (when the shell has a minimal
-environment) and re-resolves kitty's socket, since kitty appends its PID
-to `kitty.conf` `listen_on` paths. Every click is logged to
+never run. The dispatch bakes just `<repo>/click-focus.sh <target>` —
+the herdr pane id (`w8:pM`) when the session runs under herdr, else
+`kwin:<KITTY_WINDOW_ID>` for a direct-kitty session (herdr wins when
+both are present). The script does the rest at click time (when the
+shell has a minimal environment) and re-resolves kitty's socket, since
+kitty appends its PID to `kitty.conf` `listen_on` paths. If the target
+no longer exists (kitty restarted since the notification), the click
+degrades to raising kitty. Every click is logged to
 `/tmp/agent-notify-click.log`.
 
 ## Configuration
